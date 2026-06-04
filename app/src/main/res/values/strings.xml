@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">CatchTouch</string>
+    <string name="accessibility_service_description">CatchTouch防误触服务，在屏幕四周创建透明遮罩层防止误触</string>
+    <string name="tile_label">CatchTouch</string>
+</resources>

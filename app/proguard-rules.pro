@@ -1,0 +1,3 @@
+-keep class com.catchtouch.app.** { *; }
+-keepclassmembers class com.catchtouch.app.** { *; }
+-dontwarn kotlinx.coroutines.**
