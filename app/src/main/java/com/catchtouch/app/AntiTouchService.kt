@@ -1,15 +1,17 @@
 package com.catchtouch.app
 
 import android.accessibilityservice.AccessibilityService
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Gravity
@@ -28,6 +30,9 @@ class AntiTouchService : AccessibilityService() {
         private const val TAG = "CatchTouch"
         private const val CHANNEL_ID = "catchtouch_service"
         private const val NOTIFICATION_ID = 1
+        private const val RESTART_REQUEST_CODE = 1001
+        private const val WATCHDOG_INTERVAL = 3000L
+        const val ACTION_RESTART_SERVICE = "com.catchtouch.app.RESTART_SERVICE"
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -36,19 +41,69 @@ class AntiTouchService : AccessibilityService() {
     private var isForeground = false
     private var overlayToastView: android.view.View? = null
     private var toastRemoveRunnable: Runnable? = null
+    private var wasEnabledBeforeDestroy = false
+
+    private val watchdogRunnable = object : Runnable {
+        override fun run() {
+            if (!isRunning) return
+            try {
+                val detected = detectForegroundApp()
+                if (detected.isNotEmpty() && detected != lastForegroundPkg && detected != packageName) {
+                    Log.d(TAG, "[WATCHDOG] fg changed: $lastForegroundPkg -> $detected")
+                    lastForegroundPkg = detected
+                }
+                applyMaskStateForCurrentApp()
+            } catch (e: Exception) {
+                Log.e(TAG, "watchdog error", e)
+            }
+            handler.postDelayed(this, WATCHDOG_INTERVAL)
+        }
+    }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         isRunning = true
+        wasEnabledBeforeDestroy = SettingsManager.isEnabled(this)
         Log.d(TAG, "onServiceConnected")
         startForegroundNotification()
+
+        lastForegroundPkg = detectForegroundApp()
+        Log.d(TAG, "detected foreground: $lastForegroundPkg")
+
+        handler.removeCallbacks(watchdogRunnable)
+        handler.postDelayed(watchdogRunnable, WATCHDOG_INTERVAL)
+
         if (SettingsManager.isEnabled(this)) {
-            val selectedApps = SettingsManager.getSelectedApps(this)
-            if (selectedApps.isEmpty() || selectedApps.contains(lastForegroundPkg)) {
-                addMasks()
-            }
+            applyMaskStateForCurrentApp()
         }
+    }
+
+    private fun detectForegroundApp(): String {
+        try {
+            val root = rootInActiveWindow
+            if (root != null) {
+                val pkg = root.packageName?.toString() ?: ""
+                if (pkg.isNotEmpty() && pkg != packageName) {
+                    return pkg
+                }
+            }
+        } catch (_: Exception) {}
+        try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            if (am != null) {
+                val tasks = am.appTasks
+                if (tasks != null) {
+                    for (task in tasks) {
+                        val top = task.taskInfo.topActivity
+                        if (top != null && top.packageName != packageName) {
+                            return top.packageName
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return ""
     }
 
     private fun startForegroundNotification() {
@@ -79,60 +134,136 @@ class AntiTouchService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
+        val eventType = event.eventType
+        val eventPkg = event.packageName?.toString() ?: ""
+        val eventCls = event.className?.toString() ?: ""
+
         if (!SettingsManager.isEnabled(this)) return
 
-        val eventType = event.eventType
-        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val pkg = event.packageName?.toString() ?: return
-            val className = event.className?.toString() ?: ""
-            Log.d(TAG, "WINDOW_STATE: pkg=$pkg cls=$className last=$lastForegroundPkg")
-        }
-
-        if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
-
-        val pkg = event.packageName?.toString() ?: return
-        if (pkg == packageName) return
-        if (pkg == lastForegroundPkg) return
-
-        val isRealApp = try {
-            packageManager.getLaunchIntentForPackage(pkg) != null ||
-                packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(pkg), 0).isNotEmpty()
-        } catch (_: Exception) { false }
-        if (!isRealApp) return
-
-        lastForegroundPkg = pkg
-        Log.d(TAG, "foreground changed: $pkg")
-
-        val selectedApps = SettingsManager.getSelectedApps(this)
-        if (selectedApps.isEmpty()) {
-            if (maskViews.isEmpty()) {
-                addMasks()
-                updateTileState()
+        if (eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            Log.d(TAG, "[EVENT] WINDOWS_CHANGED pkg=$eventPkg cls=$eventCls")
+            val detected = detectForegroundApp()
+            if (detected.isNotEmpty() && detected != lastForegroundPkg && detected != packageName) {
+                Log.d(TAG, "[WIN_SWITCH] $lastForegroundPkg -> $detected (detected from windows change)")
+                lastForegroundPkg = detected
+                applyMaskStateForCurrentApp()
+            } else if (detected.isNotEmpty() && detected == lastForegroundPkg) {
+                applyMaskStateForCurrentApp()
             }
             return
         }
 
-        val shouldShow = selectedApps.contains(pkg)
-        Log.d(TAG, "shouldShow=$shouldShow for $pkg, selected=$selectedApps, masks=${maskViews.size}")
-        if (shouldShow && maskViews.isEmpty()) {
-            showToast("CatchTouch: 遮罩已生效")
-            handler.postDelayed({ addMasks(); updateTileState() }, 500)
-        } else if (!shouldShow && maskViews.isNotEmpty()) {
+        if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+
+        Log.d(TAG, "[EVENT] type=0x20 pkg=$eventPkg cls=$eventCls")
+
+        val pkg = eventPkg
+        if (pkg.isEmpty()) return
+        if (pkg == packageName) {
+            Log.d(TAG, "[EVENT] skipped: self package")
+            return
+        }
+
+        val realApp = isRealApp(pkg)
+        Log.d(TAG, "[EVENT] isRealApp=$realApp for $pkg")
+        if (!realApp) return
+
+        if (pkg != lastForegroundPkg) {
+            Log.d(TAG, "[SWITCH] $lastForegroundPkg -> $pkg")
+            lastForegroundPkg = pkg
+        } else {
+            Log.d(TAG, "[EVENT] same pkg=$pkg, re-check state")
+        }
+
+        applyMaskStateForCurrentApp()
+    }
+
+    private fun isRealApp(pkg: String): Boolean {
+        return try {
+            packageManager.getLaunchIntentForPackage(pkg) != null ||
+                packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(pkg), 0).isNotEmpty()
+        } catch (_: Exception) { false }
+    }
+
+    private fun shouldShowMask(): Boolean {
+        if (!SettingsManager.isEnabled(this)) return false
+        val selectedApps = SettingsManager.getSelectedApps(this)
+        return selectedApps.isEmpty() || selectedApps.contains(lastForegroundPkg)
+    }
+
+    private fun applyMaskStateForCurrentApp() {
+        val shouldShow = shouldShowMask()
+        val isShowing = maskViews.isNotEmpty() && maskViews.any { it.isAttachedToWindow }
+        val selectedApps = SettingsManager.getSelectedApps(this)
+
+        Log.d(TAG, "[RECONCILE] lastPkg=$lastForegroundPkg shouldShow=$shouldShow isShowing=$isShowing masks=${maskViews.size} selectedApps=$selectedApps")
+
+        if (shouldShow && !isShowing) {
+            if (maskViews.isNotEmpty()) {
+                Log.d(TAG, "[RECONCILE] cleaning detached masks before re-add")
+                removeMasks()
+            }
+            addMasks()
+            updateTileState()
+            if (selectedApps.isNotEmpty()) {
+                showToast("CatchTouch: 遮罩已生效")
+            }
+            Log.d(TAG, "[RECONCILE] => MASKS ADDED, count=${maskViews.size}")
+        } else if (!shouldShow && isShowing) {
             removeMasks()
             updateTileState()
-            showToast("CatchTouch: 遮罩已关闭")
+            if (selectedApps.isNotEmpty()) {
+                showToast("CatchTouch: 遮罩已关闭")
+            }
+            Log.d(TAG, "[RECONCILE] => MASKS REMOVED")
+        } else {
+            Log.d(TAG, "[RECONCILE] => NO CHANGE (shouldShow=$shouldShow isShowing=$isShowing)")
         }
     }
 
     override fun onInterrupt() {}
 
     override fun onDestroy() {
-        super.onDestroy()
+        wasEnabledBeforeDestroy = SettingsManager.isEnabled(this)
+        handler.removeCallbacks(watchdogRunnable)
         removeMasks()
         instance = null
         isRunning = false
         isForeground = false
         Log.d(TAG, "onDestroy")
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.d(TAG, "onTaskRemoved - scheduling restart")
+        if (SettingsManager.isEnabled(this)) {
+            restartServiceViaAlarm()
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY
+    }
+
+    private fun restartServiceViaAlarm() {
+        try {
+            val restartIntent = Intent(this, ServiceRestartReceiver::class.java).apply {
+                action = ACTION_RESTART_SERVICE
+            }
+            val pendingIntent = PendingIntent.getBroadcast(
+                this, RESTART_REQUEST_CODE, restartIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            alarmManager.setAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + 1500,
+                pendingIntent
+            )
+            Log.d(TAG, "scheduled service restart via alarm")
+        } catch (e: Exception) {
+            Log.e(TAG, "restartServiceViaAlarm failed", e)
+        }
     }
 
     private var volumeDownTime = 0L
@@ -175,7 +306,9 @@ class AntiTouchService : AccessibilityService() {
     }
 
     private fun toggleMask() {
-        if (SettingsManager.isEnabled(this)) {
+        val wasEnabled = SettingsManager.isEnabled(this)
+        Log.d(TAG, "[TOGGLE] vol long press: wasEnabled=$wasEnabled lastPkg=$lastForegroundPkg masks=${maskViews.size}")
+        if (wasEnabled) {
             disableMask()
         } else {
             enableMask()
@@ -184,20 +317,31 @@ class AntiTouchService : AccessibilityService() {
 
     fun enableMask(): Boolean {
         SettingsManager.setEnabled(this, true)
+        wasEnabledBeforeDestroy = true
+        Log.d(TAG, "[ENABLE] lastPkg=$lastForegroundPkg masks=${maskViews.size}")
+
         val selectedApps = SettingsManager.getSelectedApps(this)
         val shouldShowNow = selectedApps.isEmpty() || selectedApps.contains(lastForegroundPkg)
-        Log.d(TAG, "enableMask: shouldShowNow=$shouldShowNow, lastPkg=$lastForegroundPkg, selected=$selectedApps")
+        Log.d(TAG, "[ENABLE] shouldShowNow=$shouldShowNow selectedApps=$selectedApps")
+
         if (shouldShowNow) {
-            val count = addMasks()
-            updateTileState()
-            val success = maskViews.isNotEmpty()
-            if (success) {
-                showToast("遮罩已开启（${count}个区域）")
+            if (maskViews.isEmpty() || maskViews.none { it.isAttachedToWindow }) {
+                if (maskViews.isNotEmpty()) removeMasks()
+                val count = addMasks()
+                updateTileState()
+                if (maskViews.isNotEmpty()) {
+                    showToast("遮罩已开启（${count}个区域）")
+                    return true
+                } else {
+                    showToast("遮罩创建失败，请检查参数")
+                    SettingsManager.setEnabled(this, false)
+                    return false
+                }
             } else {
-                showToast("遮罩创建失败，请检查参数")
-                SettingsManager.setEnabled(this, false)
+                updateTileState()
+                showToast("遮罩已开启（${maskViews.size}个区域）")
+                return true
             }
-            return success
         } else {
             updateTileState()
             showToast("CatchTouch已启用，切到目标应用时自动生效")
@@ -206,12 +350,12 @@ class AntiTouchService : AccessibilityService() {
     }
 
     fun disableMask() {
+        Log.d(TAG, "[DISABLE] masks=${maskViews.size}")
         SettingsManager.setEnabled(this, false)
+        wasEnabledBeforeDestroy = false
         removeMasks()
         updateTileState()
-        handler.post {
-            showToast("遮罩已关闭")
-        }
+        showToast("遮罩已关闭")
     }
 
     fun isMaskActive(): Boolean = maskViews.isNotEmpty()
@@ -221,7 +365,9 @@ class AntiTouchService : AccessibilityService() {
 
         val mode = SettingsManager.getMode(this)
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        @Suppress("DEPRECATION")
         val realMetrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
         wm.defaultDisplay.getRealMetrics(realMetrics)
         val sw = realMetrics.widthPixels
         val sh = realMetrics.heightPixels

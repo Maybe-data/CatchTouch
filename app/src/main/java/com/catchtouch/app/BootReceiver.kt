@@ -3,12 +3,22 @@ package com.catchtouch.app
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-            if (SettingsManager.isEnabled(context)) {
-                context.startService(Intent(context, AntiTouchService::class.java))
+        val action = intent.action ?: return
+        Log.d("CatchTouch", "BootReceiver: $action")
+        when (action) {
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_LOCKED_BOOT_COMPLETED,
+            "android.intent.action.QUICKBOOT_POWERON",
+            "com.htc.intent.action.QUICKBOOT_POWERON" -> {
+                if (SettingsManager.isEnabled(context)) {
+                    try {
+                        context.startService(Intent(context, AntiTouchService::class.java))
+                    } catch (_: Exception) {}
+                }
             }
         }
     }
