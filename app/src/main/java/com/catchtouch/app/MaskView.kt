@@ -27,13 +27,6 @@ class MaskView @JvmOverloads constructor(
         isAntiAlias = true
     }
 
-    private val textPaint = Paint().apply {
-        color = Color.parseColor("#9C27B0")
-        textSize = 30f
-        textAlign = Paint.Align.CENTER
-        isAntiAlias = true
-    }
-
     var maskMode: MaskMode = MaskMode.MODE_ONE
     var topPercent: Float = 0.05f
     var bottomPercent: Float = 0.05f
@@ -45,10 +38,8 @@ class MaskView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (!showPreview) return
-
         val w = width.toFloat()
         val h = height.toFloat()
-
         when (maskMode) {
             MaskMode.MODE_ONE -> drawRectPreview(canvas, w, h)
             MaskMode.MODE_TWO -> drawFanPreview(canvas, w, h)
@@ -57,8 +48,6 @@ class MaskView @JvmOverloads constructor(
                 drawFanPreview(canvas, w, h)
             }
         }
-
-
     }
 
     private fun drawRectPreview(canvas: Canvas, w: Float, h: Float) {
@@ -66,7 +55,6 @@ class MaskView @JvmOverloads constructor(
         val bottomH = h * bottomPercent
         val leftW = w * leftPercent
         val rightW = w * rightPercent
-
         if (topPercent > 0f) {
             canvas.drawRect(0f, 0f, w, topH, maskPaint)
             canvas.drawLine(0f, topH, w, topH, borderPaint)
@@ -87,9 +75,7 @@ class MaskView @JvmOverloads constructor(
 
     private fun drawFanPreview(canvas: Canvas, w: Float, h: Float) {
         if (thumbPercent <= 0f) return
-
         val r = Math.max(w, h) * thumbPercent
-
         val leftPath = Path().apply {
             moveTo(0f, h)
             lineTo(0f, h - r)
@@ -99,7 +85,6 @@ class MaskView @JvmOverloads constructor(
         }
         canvas.drawPath(leftPath, maskPaint)
         canvas.drawPath(leftPath, borderPaint)
-
         val rightPath = Path().apply {
             moveTo(w, h)
             lineTo(w - r, h)
@@ -109,22 +94,5 @@ class MaskView @JvmOverloads constructor(
         }
         canvas.drawPath(rightPath, maskPaint)
         canvas.drawPath(rightPath, borderPaint)
-    }
-
-    private fun drawCenterInfo(canvas: Canvas, w: Float, h: Float) {
-        val lines = mutableListOf<String>()
-        lines.add(maskMode.label)
-        if (maskMode == MaskMode.MODE_ONE || maskMode == MaskMode.MIXED) {
-            lines.add("顶:${(topPercent * 100).toInt()}% 底:${(bottomPercent * 100).toInt()}%")
-            lines.add("左:${(leftPercent * 100).toInt()}% 右:${(rightPercent * 100).toInt()}%")
-        }
-        if (maskMode == MaskMode.MODE_TWO || maskMode == MaskMode.MIXED) {
-            lines.add("拇指:${(thumbPercent * 100).toInt()}%")
-        }
-        val lineHeight = 40f
-        val startY = h / 2 - (lines.size - 1) * lineHeight / 2
-        lines.forEachIndexed { i, line ->
-            canvas.drawText(line, w / 2, startY + i * lineHeight, textPaint)
-        }
     }
 }

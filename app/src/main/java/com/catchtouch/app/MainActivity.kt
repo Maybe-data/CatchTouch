@@ -9,7 +9,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
@@ -21,7 +20,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -340,6 +338,8 @@ fun PermissionCheck() {
     val context = LocalContext.current
     var accessibilityEnabled by remember { mutableStateOf(false) }
     var overlayEnabled by remember { mutableStateOf(false) }
+    var usageStatsEnabled by remember { mutableStateOf(false) }
+    var batteryOptimized by remember { mutableStateOf(true) }
 
     fun checkPermissions() {
         val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
@@ -348,29 +348,65 @@ fun PermissionCheck() {
         val flat = cn.flattenToString()
         accessibilityEnabled = enabledServices.contains(flat) || enabledServices.contains(cn.packageName)
         overlayEnabled = Settings.canDrawOverlays(context)
+        try {
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager
+            val now = System.currentTimeMillis()
+            val stats = usm.queryUsageStats(0, now - 60000, now)
+            usageStatsEnabled = stats != null && stats.isNotEmpty()
+        } catch (_: Exception) {
+            usageStatsEnabled = false
+        }
+        val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        batteryOptimized = !pm.isIgnoringBatteryOptimizations(context.packageName)
     }
 
     androidx.lifecycle.compose.LifecycleEventEffect(event = androidx.lifecycle.Lifecycle.Event.ON_RESUME) { checkPermissions() }
     LaunchedEffect(Unit) { checkPermissions() }
 
-    if (!accessibilityEnabled || !overlayEnabled) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (!accessibilityEnabled) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Button(
-                        onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE53935)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("开启无障碍服务", color = Color.White, fontSize = 13.sp) }
-                    Text("设置 → 无障碍 → CatchTouch → 开启", color = Color(0xFF999999), fontSize = 11.sp)
-                }
-            }
-            if (!overlayEnabled) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (!accessibilityEnabled) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Button(
-                    onClick = { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFA000)),
+                    onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE53935)),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("允许悬浮窗权限", color = Color.White, fontSize = 13.sp) }
+                ) { Text("开启无障碍服务", color = Color.White, fontSize = 13.sp) }
+                Text("设置 → 无障碍 → CatchTouch → 开启", color = Color(0xFF999999), fontSize = 11.sp)
+            }
+        }
+        if (!overlayEnabled) {
+            Button(
+                onClick = { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFA000)),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("允许悬浮窗权限", color = Color.White, fontSize = 13.sp) }
+        }
+        if (!usageStatsEnabled) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Button(
+                    onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7B1FA2)),
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("允许查看使用情况", color = Color.White, fontSize = 13.sp) }
+                Text("设置 → 应用管理 → 特殊权限 → 查看使用情况 → CatchTouch", color = Color(0xFF999999), fontSize = 11.sp)
+            }
+        }
+        if (batteryOptimized && accessibilityEnabled) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Button(
+                    onClick = {
+                        try {
+                            context.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}")))
+                        } catch (_: Exception) {
+                            context.startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("关闭电池优化（防杀后台）", color = Color.White, fontSize = 13.sp) }
+                Text("OPPO/一加: 还需开启 自启动 + 后台运行允许", color = Color(0xFFE53935), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("设置 → 应用管理 → CatchTouch → 电池 → 不限制", color = Color(0xFF999999), fontSize = 11.sp)
+                Text("设置 → 应用管理 → CatchTouch → 自启动 → 开启", color = Color(0xFF999999), fontSize = 11.sp)
             }
         }
     }
