@@ -1,18 +1,19 @@
 package com.catchtouch.app
 
 import android.accessibilityservice.AccessibilityService
+import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.usage.UsageStatsManager
-import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -26,9 +27,11 @@ import android.view.accessibility.AccessibilityEvent
 import android.widget.FrameLayout
 import android.widget.TextView
 
+@SuppressLint("AccessibilityService")
 class AntiTouchService : AccessibilityService() {
 
     companion object {
+        @SuppressLint("StaticFieldLeak")
         var instance: AntiTouchService? = null
         var isRunning: Boolean = false
             private set
@@ -59,26 +62,33 @@ class AntiTouchService : AccessibilityService() {
     private var pendingPkg = ""
     private var pendingTime = 0L
 
+    private fun WindowManager.LayoutParams.allowCutout() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+    }
+
     private fun acquireWakeLock() {
         try {
             if (wakeLock == null) {
-                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                val pm = getSystemService(POWER_SERVICE) as PowerManager
                 wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "catchtouch:service")
                 wakeLock?.setReferenceCounted(false)
             }
-            if (wakeLock?.isHeld != true) wakeLock?.acquire()
+            if (wakeLock?.isHeld != true) wakeLock?.acquire(12 * 60 * 60 * 1000L)
         } catch (_: Exception) {}
     }
 
     private fun releaseWakeLock() {
-        try {
-            if (wakeLock?.isHeld == true) wakeLock?.release()
-        } catch (_: Exception) {}
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() }
+        catch (_: Exception) {}
     }
 
     private fun detectForegroundApp(): String {
         try {
-            val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+            val usm = getSystemService(USAGE_STATS_SERVICE) as? UsageStatsManager
                 ?: return fallbackDetect()
             val now = System.currentTimeMillis()
             val stats = usm.queryUsageStats(0, now - 1000, now)
@@ -162,15 +172,13 @@ class AntiTouchService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null || !SettingsManager.isEnabled(this)) return
-        when (event.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                val pkg = event.packageName?.toString() ?: ""
-                if (pkg.isEmpty() || pkg == packageName) return
-                if (updateForegroundPkg(pkg)) applyMaskState()
-            }
-            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
-                if (updateForegroundPkg(detectForegroundApp())) applyMaskState()
-            }
+        val eventType = event.eventType
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val pkg = event.packageName?.toString() ?: ""
+            if (pkg.isEmpty() || pkg == packageName) return
+            if (updateForegroundPkg(pkg)) applyMaskState()
+        } else if (eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            if (updateForegroundPkg(detectForegroundApp())) applyMaskState()
         }
     }
 
@@ -205,7 +213,7 @@ class AntiTouchService : AccessibilityService() {
                     this, RESTART_REQUEST_CODE + i, intent,
                     PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
                 )
-                (getSystemService(Context.ALARM_SERVICE) as AlarmManager).setExactAndAllowWhileIdle(
+                (getSystemService(ALARM_SERVICE) as AlarmManager).setAndAllowWhileIdle(
                     AlarmManager.ELAPSED_REALTIME_WAKEUP,
                     SystemClock.elapsedRealtime() + delay, pi
                 )
@@ -248,6 +256,7 @@ class AntiTouchService : AccessibilityService() {
         updateNotification()
     }
 
+    @SuppressLint("MissingPermission")
     private fun updateNotification() {
         val fgLabel = if (lastForegroundPkg.isNotEmpty()) {
             try {
@@ -262,14 +271,16 @@ class AntiTouchService : AccessibilityService() {
             Intent(this, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) },
             PendingIntent.FLAG_IMMUTABLE
         )
-        val notification = Notification.Builder(this, CHANNEL_ID)
+        val builder = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("CatchTouch")
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_tile)
             .setContentIntent(pi)
             .setOngoing(true)
-            .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
-            .build()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+        }
+        val notification = builder.build()
         if (isForeground) {
             getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
         } else {
@@ -362,8 +373,6 @@ class AntiTouchService : AccessibilityService() {
         showToast("遮罩已关闭")
     }
 
-    fun isMaskActive(): Boolean = maskViews.isNotEmpty()
-
     private fun addMasks(): Int {
         if (maskViews.isNotEmpty()) return maskViews.size
         val mode = SettingsManager.getMode(this)
@@ -395,60 +404,54 @@ class AntiTouchService : AccessibilityService() {
         wm: WindowManager, sw: Int, sh: Int,
         topP: Float, bottomP: Float, leftP: Float, rightP: Float
     ) {
-        val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         val topH = (sh * topP).toInt()
         val bottomH = (sh * bottomP).toInt()
         val leftW = (sw * leftP).toInt()
         val rightW = (sw * rightP).toInt()
-        if (topP > 0f) addBlockView(wm, sw, topH, Gravity.TOP or Gravity.START, 0, 0, flags)
-        if (bottomP > 0f) addBlockView(wm, sw, bottomH, Gravity.BOTTOM or Gravity.START, 0, 0, flags)
-        if (leftP > 0f) addBlockView(wm, leftW, sh - topH - bottomH, Gravity.TOP or Gravity.START, 0, topH, flags)
-        if (rightP > 0f) addBlockView(wm, rightW, sh - topH - bottomH, Gravity.TOP or Gravity.END, 0, topH, flags)
+        if (topP > 0f) addBlockView(wm, sw, topH, Gravity.TOP or Gravity.START, 0)
+        if (bottomP > 0f) addBlockView(wm, sw, bottomH, Gravity.BOTTOM or Gravity.START, 0)
+        if (leftP > 0f) addBlockView(wm, leftW, sh - topH - bottomH, Gravity.TOP or Gravity.START, topH)
+        if (rightP > 0f) addBlockView(wm, rightW, sh - topH - bottomH, Gravity.TOP or Gravity.END, topH)
     }
 
     private fun addFanMasks(wm: WindowManager, sw: Int, sh: Int, thumbP: Float) {
         if (thumbP <= 0f) return
         val radius = (Math.max(sw, sh) * thumbP).toInt()
-        val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-        val leftView = FanMaskView(this, true, radius)
+        val leftView = FanMaskView(this).apply { isLeftFan = true; fanRadius = radius }
         wm.addView(leftView, WindowManager.LayoutParams(
             radius, radius,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            flags, PixelFormat.TRANSLUCENT
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.START
-            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            allowCutout()
         })
         maskViews.add(leftView)
-
-        val rightView = FanMaskView(this, false, radius)
+        val rightView = FanMaskView(this).apply { isLeftFan = false; fanRadius = radius }
         wm.addView(rightView, WindowManager.LayoutParams(
             radius, radius,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            flags, PixelFormat.TRANSLUCENT
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.END
-            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            allowCutout()
         })
         maskViews.add(rightView)
     }
 
-    private fun addBlockView(
-        wm: WindowManager, width: Int, height: Int,
-        gravity: Int, x: Int, y: Int, flags: Int
-    ) {
+    private fun addBlockView(wm: WindowManager, width: Int, height: Int, gravity: Int, y: Int) {
         val view = BlockView(this)
         wm.addView(view, WindowManager.LayoutParams(
             width, height,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            flags, PixelFormat.TRANSLUCENT
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
         ).apply {
             this.gravity = gravity
-            this.x = x
             this.y = y
-            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            allowCutout()
         })
         maskViews.add(view)
     }
@@ -484,11 +487,6 @@ class AntiTouchService : AccessibilityService() {
 
     private fun updateTileState() { AntiTouchTileService.instance?.updateTile() }
 
-    fun refreshMasks() {
-        removeMasks()
-        if (SettingsManager.isEnabled(this)) addMasks()
-    }
-
     private fun showToast(text: String) {
         pendingToastText = text
         handler.removeCallbacks(toastDelayRunnable)
@@ -523,7 +521,7 @@ class AntiTouchService : AccessibilityService() {
                     PixelFormat.TRANSLUCENT
                 ).apply {
                     gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    allowCutout()
                 })
                 overlayToastView = container
                 val removeRunnable = Runnable {

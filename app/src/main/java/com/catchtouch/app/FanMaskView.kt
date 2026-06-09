@@ -4,14 +4,18 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Path
 import android.graphics.Region
+import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
 
-class FanMaskView(
+class FanMaskView @JvmOverloads constructor(
     context: Context,
-    private val isLeft: Boolean,
-    private val radius: Int
-) : View(context) {
+    attrs: AttributeSet? = null,
+    defStyleAttr: Int = 0
+) : View(context, attrs, defStyleAttr) {
+
+    var isLeftFan = true
+    var fanRadius = 0
 
     private val fanPath = Path()
     private val fanRegion = Region()
@@ -20,9 +24,9 @@ class FanMaskView(
         super.onSizeChanged(w, h, oldw, oldh)
         val wf = w.toFloat()
         val hf = h.toFloat()
-        val r = radius.toFloat()
+        val r = fanRadius.toFloat()
         fanPath.reset()
-        if (isLeft) {
+        if (isLeftFan) {
             fanPath.moveTo(0f, hf)
             fanPath.lineTo(0f, hf - r)
             fanPath.arcTo(-r, hf - r, r, hf + r, 270f, 90f, false)
@@ -40,6 +44,13 @@ class FanMaskView(
 
     override fun onDraw(canvas: Canvas) {}
 
-    override fun onTouchEvent(event: MotionEvent): Boolean =
-        fanRegion.contains(event.x.toInt(), event.y.toInt())
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.action == MotionEvent.ACTION_UP) performClick()
+        return fanRegion.contains(event.x.toInt(), event.y.toInt())
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
 }

@@ -2,7 +2,6 @@ package com.catchtouch.app
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.util.AttributeSet
@@ -15,13 +14,13 @@ class MaskView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     private val maskPaint = Paint().apply {
-        color = Color.parseColor("#1FCE93D8")
+        color = 0x1FCE93D8
         style = Paint.Style.FILL
         isAntiAlias = true
     }
 
     private val borderPaint = Paint().apply {
-        color = Color.parseColor("#7B1FA2")
+        color = 0xFF7B1FA2.toInt()
         style = Paint.Style.STROKE
         strokeWidth = 1.5f
         isAntiAlias = true

@@ -1,6 +1,7 @@
 package com.catchtouch.app
 
-import android.accessibilityservice.AccessibilityServiceInfo
+import android.app.ActivityManager
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -8,7 +9,6 @@ import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
-import android.view.accessibility.AccessibilityManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (SettingsManager.isHideFromRecents(this)) {
             try {
-                val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                val am = getSystemService(ACTIVITY_SERVICE) as ActivityManager
                 am.appTasks?.forEach { it.setExcludeFromRecents(true) }
             } catch (_: Exception) {}
         }
@@ -92,7 +92,6 @@ private val Purple50 = Color(0xFFF3E5F5)
 private val Purple100 = Color(0xFFE1BEE7)
 private val Purple200 = Color(0xFFCE93D8)
 private val Purple300 = Color(0xFFBA68C8)
-private val Purple500 = Color(0xFF9C27B0)
 
 data class AppInfo(val packageName: String, val label: String)
 
@@ -226,17 +225,10 @@ fun MainScreen() {
                             onCheckedChange = { checked ->
                                 hideRecents = checked
                                 SettingsManager.setHideFromRecents(context, checked)
-                                if (checked) {
-                                    try {
-                                        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-                                        am.appTasks?.forEach { it.setExcludeFromRecents(true) }
-                                    } catch (_: Exception) {}
-                                } else {
-                                    try {
-                                        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-                                        am.appTasks?.forEach { it.setExcludeFromRecents(false) }
-                                    } catch (_: Exception) {}
-                                }
+                                try {
+                                    val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                                    am.appTasks?.forEach { it.setExcludeFromRecents(checked) }
+                                } catch (_: Exception) {}
                             },
                             colors = SwitchDefaults.colors(checkedThumbColor = Purple200, checkedTrackColor = Purple300)
                         )
@@ -258,6 +250,7 @@ fun AppSelector() {
 
     val installedApps = remember {
         val pm = context.packageManager
+        @Suppress("DEPRECATION")
         pm.getInstalledApplications(0)
             .filter { it.flags and ApplicationInfo.FLAG_SYSTEM == 0 }
             .mapNotNull { appInfo ->
@@ -278,7 +271,7 @@ fun AppSelector() {
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(
             value = displayText,
-            onValueChange = {},
+            onValueChange = { _ -> },
             readOnly = true,
             label = { Text("针对应用", color = Purple300, fontSize = 12.sp) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
@@ -299,7 +292,7 @@ fun AppSelector() {
                 }
             )
             sortedApps.forEach { app ->
-                val isSelected = selectedApps.contains(app.packageName)
+                val isSelected = app.packageName in selectedApps
                 DropdownMenuItem(
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -319,11 +312,7 @@ fun AppSelector() {
                         }
                     },
                     onClick = {
-                        val newSet = if (isSelected) {
-                            selectedApps - app.packageName
-                        } else {
-                            selectedApps + app.packageName
-                        }
+                        val newSet = if (isSelected) selectedApps - app.packageName else selectedApps + app.packageName
                         selectedApps = newSet
                         SettingsManager.setSelectedApps(context, newSet)
                     }
@@ -340,24 +329,25 @@ fun PermissionCheck() {
     var overlayEnabled by remember { mutableStateOf(false) }
     var usageStatsEnabled by remember { mutableStateOf(false) }
     var batteryOptimized by remember { mutableStateOf(true) }
+    var notificationDisabled by remember { mutableStateOf(false) }
 
     fun checkPermissions() {
-        val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
         val enabledServices = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: ""
         val cn = ComponentName(context, AntiTouchService::class.java)
-        val flat = cn.flattenToString()
-        accessibilityEnabled = enabledServices.contains(flat) || enabledServices.contains(cn.packageName)
+        accessibilityEnabled = enabledServices.contains(cn.flattenToString()) || enabledServices.contains(cn.packageName)
         overlayEnabled = Settings.canDrawOverlays(context)
         try {
             val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager
             val now = System.currentTimeMillis()
             val stats = usm.queryUsageStats(0, now - 60000, now)
-            usageStatsEnabled = stats != null && stats.isNotEmpty()
+            usageStatsEnabled = stats.isNotEmpty()
         } catch (_: Exception) {
             usageStatsEnabled = false
         }
         val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
         batteryOptimized = !pm.isIgnoringBatteryOptimizations(context.packageName)
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationDisabled = !nm.areNotificationsEnabled()
     }
 
     androidx.lifecycle.compose.LifecycleEventEffect(event = androidx.lifecycle.Lifecycle.Event.ON_RESUME) { checkPermissions() }
@@ -391,14 +381,26 @@ fun PermissionCheck() {
                 Text("设置 → 应用管理 → 特殊权限 → 查看使用情况 → CatchTouch", color = Color(0xFF999999), fontSize = 11.sp)
             }
         }
+        if (notificationDisabled) {
+            Button(
+                onClick = {
+                    context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    })
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0)),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("允许通知权限", color = Color.White, fontSize = 13.sp) }
+        }
         if (batteryOptimized && accessibilityEnabled) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Button(
                     onClick = {
                         try {
-                            context.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}")))
+                            @Suppress("IntentUri") context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}")))
                         } catch (_: Exception) {
-                            context.startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+                            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0)),
@@ -418,7 +420,7 @@ fun ModeDropdown(selected: MaskMode, onSelect: (MaskMode) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(
-            value = selected.label, onValueChange = {}, readOnly = true,
+            value = selected.label, onValueChange = { _ -> }, readOnly = true,
             label = { Text("模式", color = Purple300, fontSize = 12.sp) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),

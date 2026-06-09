@@ -1,6 +1,5 @@
 package com.catchtouch.app
 
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -17,7 +16,7 @@ class ServiceRestartReceiver : BroadcastReceiver() {
         if (intent.action != AntiTouchService.ACTION_RESTART_SERVICE) return
         if (!SettingsManager.isEnabled(context) || AntiTouchService.isRunning) return
         val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-        val enabled = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        val enabled = am.getEnabledAccessibilityServiceList(0)
         val stillEnabled = enabled.any { it.resolveInfo.serviceInfo.packageName == context.packageName }
         if (!stillEnabled) {
             try {
@@ -56,7 +55,7 @@ class ServiceRestartReceiver : BroadcastReceiver() {
                     context, CHECK_REQUEST_CODE, intent,
                     PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
                 )
-                (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).setExactAndAllowWhileIdle(
+                (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).setAndAllowWhileIdle(
                     AlarmManager.ELAPSED_REALTIME_WAKEUP,
                     SystemClock.elapsedRealtime() + 5000, pi
                 )
