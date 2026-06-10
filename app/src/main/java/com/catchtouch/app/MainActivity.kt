@@ -234,7 +234,7 @@ fun MainScreen() {
                         )
                     }
 
-                    Text("长按音量-键切换遮罩开关", color = Color(0xFFBBBBBB), fontSize = 11.sp)
+                    Text("长按音量+键切换遮罩开关", color = Color(0xFFBBBBBB), fontSize = 11.sp)
                 }
             }
         }

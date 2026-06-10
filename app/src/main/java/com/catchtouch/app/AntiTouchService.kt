@@ -289,10 +289,10 @@ class AntiTouchService : AccessibilityService() {
         }
     }
 
-    private var volumeDownTime = 0L
+    private var volumeUpTime = 0L
     private var longPressHandled = false
     private val longPressCheck = Runnable {
-        if (!longPressHandled && volumeDownTime > 0L) {
+        if (!longPressHandled && volumeUpTime > 0L) {
             longPressHandled = true
             toggleMask()
         }
@@ -300,11 +300,11 @@ class AntiTouchService : AccessibilityService() {
 
     override fun onKeyEvent(event: KeyEvent?): Boolean {
         if (event == null) return super.onKeyEvent(event)
-        if (event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+        if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
             when (event.action) {
                 KeyEvent.ACTION_DOWN -> {
                     if (event.repeatCount == 0) {
-                        volumeDownTime = System.currentTimeMillis()
+                        volumeUpTime = System.currentTimeMillis()
                         longPressHandled = false
                         handler.removeCallbacks(longPressCheck)
                         handler.postDelayed(longPressCheck, 600L)
@@ -315,10 +315,10 @@ class AntiTouchService : AccessibilityService() {
                     handler.removeCallbacks(longPressCheck)
                     if (!longPressHandled) {
                         (getSystemService(AUDIO_SERVICE) as AudioManager).adjustVolume(
-                            AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI
+                            AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI
                         )
                     }
-                    volumeDownTime = 0L
+                    volumeUpTime = 0L
                     return true
                 }
             }
