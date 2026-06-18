@@ -241,6 +241,8 @@ class AntiTouchService : AccessibilityService() {
             updateNotification()
             updateTileState()
             showToast("遮罩已关闭")
+        } else {
+            updateNotification()
         }
     }
 
@@ -265,7 +267,16 @@ class AntiTouchService : AccessibilityService() {
                 ).toString()
             } catch (_: Exception) { lastForegroundPkg }
         } else "无"
-        val text = if (SettingsManager.isEnabled(this)) "防误触运行中 · 当前: $fgLabel" else "防误触服务运行中"
+        val text = if (SettingsManager.isEnabled(this)) {
+            val inTargetList = SettingsManager.getSelectedApps(this).let {
+                it.isEmpty() || it.contains(lastForegroundPkg)
+            }
+            if (!inTargetList) "防误触服务运行中·无遮罩"
+            else {
+                val maskShowing = maskViews.isNotEmpty() && maskViews.any { it.isAttachedToWindow }
+                if (maskShowing) "防误触遮罩开启 · 当前: $fgLabel" else "防误触遮罩关闭 · 当前: $fgLabel"
+            }
+        } else "防误触服务关闭"
         val pi = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) },
