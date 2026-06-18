@@ -2,12 +2,10 @@ package com.catchtouch.app
 
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
-import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.usage.UsageStatsManager
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -16,7 +14,6 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.PowerManager
 import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.view.Gravity
@@ -37,11 +34,8 @@ class AntiTouchService : AccessibilityService() {
             private set
         private const val CHANNEL_ID = "catchtouch_service"
         private const val NOTIFICATION_ID = 1
-        private const val RESTART_REQUEST_CODE = 1001
         private const val WATCHDOG_INTERVAL = 500L
-        private const val DEBOUNCE_MS = 400L
-        private const val DEBOUNCE_OFF_MS = 1500L
-        const val ACTION_RESTART_SERVICE = "com.catchtouch.app.RESTART_SERVICE"
+        private const val DEBOUNCE_MS = 500L
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -57,8 +51,6 @@ class AntiTouchService : AccessibilityService() {
         pendingToastText = null
         if (text != null) showToastNow(text)
     }
-    private var wasEnabledBeforeDestroy = false
-    private var wakeLock: PowerManager.WakeLock? = null
     private var pendingPkg = ""
     private var pendingTime = 0L
 
@@ -70,39 +62,7 @@ class AntiTouchService : AccessibilityService() {
         }
     }
 
-    private fun acquireWakeLock() {
-        try {
-            if (wakeLock == null) {
-                val pm = getSystemService(POWER_SERVICE) as PowerManager
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "catchtouch:service")
-                wakeLock?.setReferenceCounted(false)
-            }
-            if (wakeLock?.isHeld != true) wakeLock?.acquire(12 * 60 * 60 * 1000L)
-        } catch (_: Exception) {}
-    }
-
-    private fun releaseWakeLock() {
-        try { if (wakeLock?.isHeld == true) wakeLock?.release() }
-        catch (_: Exception) {}
-    }
-
     private fun detectForegroundApp(): String {
-        try {
-            val usm = getSystemService(USAGE_STATS_SERVICE) as? UsageStatsManager
-                ?: return fallbackDetect()
-            val now = System.currentTimeMillis()
-            val stats = usm.queryUsageStats(0, now - 1000, now)
-            if (!stats.isNullOrEmpty()) {
-                val top = stats
-                    .filter { it.packageName != packageName && it.lastTimeUsed > 0 }
-                    .maxByOrNull { it.lastTimeUsed }
-                if (top != null) return top.packageName
-            }
-        } catch (_: Exception) {}
-        return fallbackDetect()
-    }
-
-    private fun fallbackDetect(): String {
         try {
             val pkg = rootInActiveWindow?.packageName?.toString() ?: ""
             if (pkg.isNotEmpty() && pkg != packageName) return pkg
@@ -115,15 +75,8 @@ class AntiTouchService : AccessibilityService() {
             pendingPkg = ""
             return false
         }
-        val currentInList = SettingsManager.getSelectedApps(this).let {
-            it.isEmpty() || it.contains(lastForegroundPkg)
-        }
-        val newInList = SettingsManager.getSelectedApps(this).let {
-            it.isEmpty() || it.contains(detected)
-        }
-        val debounceMs = if (currentInList && !newInList) DEBOUNCE_OFF_MS else DEBOUNCE_MS
         val now = SystemClock.elapsedRealtime()
-        if (detected == pendingPkg && (now - pendingTime) >= debounceMs) {
+        if (detected == pendingPkg && (now - pendingTime) >= DEBOUNCE_MS) {
             lastForegroundPkg = detected
             pendingPkg = ""
             return true
@@ -144,7 +97,7 @@ class AntiTouchService : AccessibilityService() {
                         applyMaskState()
                     } else {
                         val shouldShow = shouldShowMask()
-                        val isShowing = maskViews.isNotEmpty() && maskViews.any { it.isAttachedToWindow }
+                        val isShowing = maskViews.isNotEmpty()
                         if (shouldShow != isShowing) applyMaskState()
                     }
                 }
@@ -157,69 +110,37 @@ class AntiTouchService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         isRunning = true
-        wasEnabledBeforeDestroy = SettingsManager.isEnabled(this)
-        ServiceRestartReceiver.cancelChecks(this)
         startForegroundNotification()
         addKeepAliveOverlay()
         lastForegroundPkg = detectForegroundApp()
         handler.removeCallbacks(watchdogRunnable)
         handler.postDelayed(watchdogRunnable, WATCHDOG_INTERVAL)
         if (SettingsManager.isEnabled(this)) {
-            acquireWakeLock()
             applyMaskState()
         }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null || !SettingsManager.isEnabled(this)) return
-        val eventType = event.eventType
-        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString() ?: ""
             if (pkg.isEmpty() || pkg == packageName) return
             if (updateForegroundPkg(pkg)) applyMaskState()
-        } else if (eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
-            if (updateForegroundPkg(detectForegroundApp())) applyMaskState()
         }
     }
 
     override fun onInterrupt() {}
 
     override fun onDestroy() {
-        wasEnabledBeforeDestroy = SettingsManager.isEnabled(this)
         handler.removeCallbacks(watchdogRunnable)
-        releaseWakeLock()
         removeMasks()
         removeKeepAliveOverlay()
         instance = null
         isRunning = false
         isForeground = false
-        if (wasEnabledBeforeDestroy) ServiceRestartReceiver.scheduleNextCheck(this)
-    }
-
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        if (SettingsManager.isEnabled(this)) restartServiceViaAlarm()
-        super.onTaskRemoved(rootIntent)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
-
-    private fun restartServiceViaAlarm() {
-        listOf(2000L, 8000L).forEachIndexed { i, delay ->
-            try {
-                val intent = Intent(this, ServiceRestartReceiver::class.java).apply {
-                    action = ACTION_RESTART_SERVICE
-                }
-                val pi = PendingIntent.getBroadcast(
-                    this, RESTART_REQUEST_CODE + i, intent,
-                    PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-                )
-                (getSystemService(ALARM_SERVICE) as AlarmManager).setAndAllowWhileIdle(
-                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    SystemClock.elapsedRealtime() + delay, pi
-                )
-            } catch (_: Exception) {}
-        }
-    }
 
     private fun shouldShowMask(): Boolean {
         if (!SettingsManager.isEnabled(this)) return false
@@ -229,9 +150,9 @@ class AntiTouchService : AccessibilityService() {
 
     private fun applyMaskState() {
         val shouldShow = shouldShowMask()
-        val isShowing = maskViews.isNotEmpty() && maskViews.any { it.isAttachedToWindow }
+        val isShowing = maskViews.isNotEmpty()
         if (shouldShow && !isShowing) {
-            if (maskViews.isNotEmpty()) removeMasks()
+            removeMasks()
             addMasks()
             updateNotification()
             updateTileState()
@@ -273,7 +194,7 @@ class AntiTouchService : AccessibilityService() {
             }
             if (!inTargetList) "防误触服务运行中·无遮罩"
             else {
-                val maskShowing = maskViews.isNotEmpty() && maskViews.any { it.isAttachedToWindow }
+                val maskShowing = maskViews.isNotEmpty()
                 if (maskShowing) "防误触遮罩开启 · 当前: $fgLabel" else "防误触遮罩关闭 · 当前: $fgLabel"
             }
         } else "防误触服务关闭"
@@ -343,17 +264,15 @@ class AntiTouchService : AccessibilityService() {
 
     fun enableMask(): Boolean {
         SettingsManager.setEnabled(this, true)
-        wasEnabledBeforeDestroy = true
-        acquireWakeLock()
         lastForegroundPkg = detectForegroundApp()
         return if (shouldShowMask()) {
             if (maskViews.isEmpty() || maskViews.none { it.isAttachedToWindow }) {
                 if (maskViews.isNotEmpty()) removeMasks()
-                val count = addMasks()
+                addMasks()
                 updateNotification()
                 updateTileState()
                 if (maskViews.isNotEmpty()) {
-                    showToast("遮罩已开启（${count}个区域）")
+                    showToast("遮罩已开启(${SettingsManager.getMode(this).label})")
                     true
                 } else {
                     showToast("遮罩创建失败")
@@ -363,25 +282,23 @@ class AntiTouchService : AccessibilityService() {
             } else {
                 updateNotification()
                 updateTileState()
-                showToast("遮罩已开启（${maskViews.size}个区域）")
+                showToast("遮罩已开启(${SettingsManager.getMode(this).label})")
                 true
             }
         } else {
             updateNotification()
             updateTileState()
-            showToast("当前应用不在名单中，切到目标应用时自动生效")
+            showToast("防误触服务开启,当前非目标应用")
             true
         }
     }
 
     fun disableMask() {
         SettingsManager.setEnabled(this, false)
-        wasEnabledBeforeDestroy = false
-        releaseWakeLock()
         removeMasks()
         updateNotification()
         updateTileState()
-        showToast("遮罩已关闭")
+        showToast("防误触服务关闭")
     }
 
     private fun addMasks(): Int {
@@ -501,7 +418,7 @@ class AntiTouchService : AccessibilityService() {
     private fun showToast(text: String) {
         pendingToastText = text
         handler.removeCallbacks(toastDelayRunnable)
-        handler.postDelayed(toastDelayRunnable, 300L)
+        handler.postDelayed(toastDelayRunnable, 1000L)
     }
 
     private fun showToastNow(text: String) {
