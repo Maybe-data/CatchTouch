@@ -327,7 +327,6 @@ fun PermissionCheck() {
     val context = LocalContext.current
     var accessibilityEnabled by remember { mutableStateOf(false) }
     var overlayEnabled by remember { mutableStateOf(false) }
-    var usageStatsEnabled by remember { mutableStateOf(false) }
     var batteryOptimized by remember { mutableStateOf(true) }
     var notificationDisabled by remember { mutableStateOf(false) }
 
@@ -336,14 +335,6 @@ fun PermissionCheck() {
         val cn = ComponentName(context, AntiTouchService::class.java)
         accessibilityEnabled = enabledServices.contains(cn.flattenToString()) || enabledServices.contains(cn.packageName)
         overlayEnabled = Settings.canDrawOverlays(context)
-        try {
-            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager
-            val now = System.currentTimeMillis()
-            val stats = usm.queryUsageStats(0, now - 60000, now)
-            usageStatsEnabled = stats.isNotEmpty()
-        } catch (_: Exception) {
-            usageStatsEnabled = false
-        }
         val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
         batteryOptimized = !pm.isIgnoringBatteryOptimizations(context.packageName)
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -370,16 +361,6 @@ fun PermissionCheck() {
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFA000)),
                 modifier = Modifier.fillMaxWidth()
             ) { Text("允许悬浮窗权限", color = Color.White, fontSize = 13.sp) }
-        }
-        if (!usageStatsEnabled) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Button(
-                    onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7B1FA2)),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("允许查看使用情况", color = Color.White, fontSize = 13.sp) }
-                Text("设置 → 应用管理 → 特殊权限 → 查看使用情况 → CatchTouch", color = Color(0xFF999999), fontSize = 11.sp)
-            }
         }
         if (notificationDisabled) {
             Button(
