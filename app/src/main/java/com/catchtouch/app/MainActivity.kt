@@ -111,7 +111,12 @@ fun MainScreen() {
     var bottomPercent by remember { mutableStateOf(SettingsManager.getBottom(context)) }
     var leftPercent by remember { mutableStateOf(SettingsManager.getLeft(context)) }
     var rightPercent by remember { mutableStateOf(SettingsManager.getRight(context)) }
-    var thumbPercent by remember { mutableStateOf(SettingsManager.getThumb(context)) }
+    var thumbLeft by remember { mutableStateOf(SettingsManager.getThumbLeft(context)) }
+    var thumbRight by remember { mutableStateOf(SettingsManager.getThumbRight(context)) }
+    var leftHoleHeight by remember { mutableStateOf(SettingsManager.getLeftHoleHeight(context)) }
+    var leftHolePos by remember { mutableStateOf(SettingsManager.getLeftHolePos(context)) }
+    var rightHoleHeight by remember { mutableStateOf(SettingsManager.getRightHoleHeight(context)) }
+    var rightHolePos by remember { mutableStateOf(SettingsManager.getRightHolePos(context)) }
     var enabled by remember { mutableStateOf(SettingsManager.isEnabled(context)) }
     var showDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -139,7 +144,12 @@ fun MainScreen() {
                     this.bottomPercent = bottomPercent
                     this.leftPercent = leftPercent
                     this.rightPercent = rightPercent
-                    this.thumbPercent = thumbPercent
+                    this.thumbLeftPercent = thumbLeft
+                    this.thumbRightPercent = thumbRight
+                    this.leftHoleHeightPercent = leftHoleHeight
+                    this.leftHolePosPercent = leftHolePos
+                    this.rightHoleHeightPercent = rightHoleHeight
+                    this.rightHolePosPercent = rightHolePos
                     this.showPreview = true
                 }
             },
@@ -149,7 +159,12 @@ fun MainScreen() {
                 view.bottomPercent = bottomPercent
                 view.leftPercent = leftPercent
                 view.rightPercent = rightPercent
-                view.thumbPercent = thumbPercent
+                view.thumbLeftPercent = thumbLeft
+                view.thumbRightPercent = thumbRight
+                view.leftHoleHeightPercent = leftHoleHeight
+                view.leftHolePosPercent = leftHolePos
+                view.rightHoleHeightPercent = rightHoleHeight
+                view.rightHolePosPercent = rightHolePos
                 view.showPreview = true
                 view.invalidate()
             },
@@ -196,10 +211,25 @@ fun MainScreen() {
                             SliderItem("左侧", leftPercent, 0.15f, Modifier.weight(1f)) { v -> leftPercent = v; SettingsManager.setLeft(context, v) }
                             SliderItem("右侧", rightPercent, 0.15f, Modifier.weight(1f)) { v -> rightPercent = v; SettingsManager.setRight(context, v) }
                         }
+                        if (leftPercent > 0f) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SliderItem("左挖孔高", leftHoleHeight, 0.30f, Modifier.weight(1f)) { v -> leftHoleHeight = v; SettingsManager.setLeftHoleHeight(context, v) }
+                                SliderItem("左挖孔位", leftHolePos, 1f, Modifier.weight(1f)) { v -> leftHolePos = v; SettingsManager.setLeftHolePos(context, v) }
+                            }
+                        }
+                        if (rightPercent > 0f) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SliderItem("右挖孔高", rightHoleHeight, 0.30f, Modifier.weight(1f)) { v -> rightHoleHeight = v; SettingsManager.setRightHoleHeight(context, v) }
+                                SliderItem("右挖孔位", rightHolePos, 1f, Modifier.weight(1f)) { v -> rightHolePos = v; SettingsManager.setRightHolePos(context, v) }
+                            }
+                        }
                     }
 
                     if (maskMode == MaskMode.MODE_TWO || maskMode == MaskMode.MIXED) {
-                        SliderItem("拇指范围", thumbPercent, 0.30f, Modifier.fillMaxWidth()) { v -> thumbPercent = v; SettingsManager.setThumb(context, v) }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SliderItem("左拇指", thumbLeft, 0.30f, Modifier.weight(1f)) { v -> thumbLeft = v; SettingsManager.setThumbLeft(context, v) }
+                            SliderItem("右拇指", thumbRight, 0.30f, Modifier.weight(1f)) { v -> thumbRight = v; SettingsManager.setThumbRight(context, v) }
+                        }
                     }
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

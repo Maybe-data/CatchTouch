@@ -31,7 +31,12 @@ class MaskView @JvmOverloads constructor(
     var bottomPercent: Float = 0.05f
     var leftPercent: Float = 0.05f
     var rightPercent: Float = 0.05f
-    var thumbPercent: Float = 0.15f
+    var thumbLeftPercent: Float = 0.15f
+    var thumbRightPercent: Float = 0.15f
+    var leftHoleHeightPercent: Float = 0f
+    var leftHolePosPercent: Float = 0.5f
+    var rightHoleHeightPercent: Float = 0f
+    var rightHolePosPercent: Float = 0.5f
     var showPreview: Boolean = true
 
     override fun onDraw(canvas: Canvas) {
@@ -63,35 +68,64 @@ class MaskView @JvmOverloads constructor(
             canvas.drawLine(0f, h - bottomH, w, h - bottomH, borderPaint)
         }
         if (leftPercent > 0f) {
-            canvas.drawRect(0f, topH, leftW, h - bottomH, maskPaint)
-            canvas.drawLine(leftW, topH, leftW, h - bottomH, borderPaint)
+            drawSide(canvas, w, h, true, topH, h - bottomH, w * leftPercent)
         }
         if (rightPercent > 0f) {
-            canvas.drawRect(w - rightW, topH, w, h - bottomH, maskPaint)
-            canvas.drawLine(w - rightW, topH, w - rightW, h - bottomH, borderPaint)
+            drawSide(canvas, w, h, false, topH, h - bottomH, w * rightPercent)
         }
     }
 
+    /** 与服务端 addSideMaskWithHole 相同的分段逻辑，绘制带孔竖条预览 */
+    private fun drawSide(canvas: Canvas, w: Float, h: Float, isLeft: Boolean, stripTop: Float, stripBottom: Float, sideW: Float) {
+        val holeHPct = if (isLeft) leftHoleHeightPercent else rightHoleHeightPercent
+        val innerX = if (isLeft) sideW else w - sideW
+        fun block(top: Float, bottom: Float) {
+            if (bottom - top <= 0f) return
+            val x1 = if (isLeft) 0f else innerX
+            val x2 = if (isLeft) sideW else w
+            canvas.drawRect(x1, top, x2, bottom, maskPaint)
+            canvas.drawLine(innerX, top, innerX, bottom, borderPaint)
+        }
+        if (holeHPct <= 0f || stripBottom <= stripTop) {
+            block(stripTop, stripBottom)
+            return
+        }
+        val posPct = if (isLeft) leftHolePosPercent else rightHolePosPercent
+        val holeH = h * holeHPct
+        var holeBottom = h - h * posPct // 位置从底部向上计
+        var holeTop = holeBottom - holeH
+        if (holeBottom - holeTop >= stripBottom - stripTop) return // 孔覆盖整条：不绘制该侧
+        if (holeBottom > stripBottom) { holeTop -= holeBottom - stripBottom; holeBottom = stripBottom }
+        if (holeTop < stripTop) { holeBottom += stripTop - holeTop; holeTop = stripTop }
+        block(stripTop, holeTop)
+        block(holeBottom, stripBottom)
+    }
+
     private fun drawFanPreview(canvas: Canvas, w: Float, h: Float) {
-        if (thumbPercent <= 0f) return
-        val r = Math.max(w, h) * thumbPercent
-        val leftPath = Path().apply {
-            moveTo(0f, h)
-            lineTo(0f, h - r)
-            arcTo(-r, h - r, r, h + r, 270f, 90f, false)
-            lineTo(0f, h)
-            close()
+        val base = Math.max(w, h)
+        if (thumbLeftPercent > 0f) {
+            val rl = base * thumbLeftPercent
+            val leftPath = Path().apply {
+                moveTo(0f, h)
+                lineTo(0f, h - rl)
+                arcTo(-rl, h - rl, rl, h + rl, 270f, 90f, false)
+                lineTo(0f, h)
+                close()
+            }
+            canvas.drawPath(leftPath, maskPaint)
+            canvas.drawPath(leftPath, borderPaint)
         }
-        canvas.drawPath(leftPath, maskPaint)
-        canvas.drawPath(leftPath, borderPaint)
-        val rightPath = Path().apply {
-            moveTo(w, h)
-            lineTo(w - r, h)
-            arcTo(w - r, h - r, w + r, h + r, 180f, 90f, false)
-            lineTo(w, h)
-            close()
+        if (thumbRightPercent > 0f) {
+            val rr = base * thumbRightPercent
+            val rightPath = Path().apply {
+                moveTo(w, h)
+                lineTo(w - rr, h)
+                arcTo(w - rr, h - rr, w + rr, h + rr, 180f, 90f, false)
+                lineTo(w, h)
+                close()
+            }
+            canvas.drawPath(rightPath, maskPaint)
+            canvas.drawPath(rightPath, borderPaint)
         }
-        canvas.drawPath(rightPath, maskPaint)
-        canvas.drawPath(rightPath, borderPaint)
     }
 }

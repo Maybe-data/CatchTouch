@@ -17,7 +17,13 @@ object SettingsManager {
     private const val KEY_BOTTOM = "bottom_percent"
     private const val KEY_LEFT = "left_percent"
     private const val KEY_RIGHT = "right_percent"
-    private const val KEY_THUMB = "thumb_percent"
+    private const val KEY_THUMB_LEFT = "thumb_left_percent"
+    private const val KEY_THUMB_RIGHT = "thumb_right_percent"
+    private const val KEY_THUMB_LEGACY = "thumb_percent"
+    private const val KEY_LEFT_HOLE_HEIGHT = "left_hole_height_percent"
+    private const val KEY_LEFT_HOLE_POS = "left_hole_pos_percent"
+    private const val KEY_RIGHT_HOLE_HEIGHT = "right_hole_height_percent"
+    private const val KEY_RIGHT_HOLE_POS = "right_hole_pos_percent"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_SELECTED_APPS = "selected_apps"
     private const val KEY_HIDE_RECENTS = "hide_from_recents"
@@ -63,11 +69,55 @@ object SettingsManager {
         prefs(context).edit { putFloat(KEY_RIGHT, v) }
     }
 
-    fun getThumb(context: Context): Float =
-        prefs(context).getFloat(KEY_THUMB, 0.15f)
+    /** 左侧拇指范围；新键无值时回退读旧版单值（老用户升级继承原设置） */
+    fun getThumbLeft(context: Context): Float {
+        val p = prefs(context)
+        if (p.contains(KEY_THUMB_LEFT)) return p.getFloat(KEY_THUMB_LEFT, 0.15f)
+        return p.getFloat(KEY_THUMB_LEGACY, 0.15f)
+    }
 
-    fun setThumb(context: Context, v: Float) {
-        prefs(context).edit { putFloat(KEY_THUMB, v) }
+    fun setThumbLeft(context: Context, v: Float) {
+        prefs(context).edit { putFloat(KEY_THUMB_LEFT, v) }
+    }
+
+    /** 右侧拇指范围；新键无值时回退读旧版单值 */
+    fun getThumbRight(context: Context): Float {
+        val p = prefs(context)
+        if (p.contains(KEY_THUMB_RIGHT)) return p.getFloat(KEY_THUMB_RIGHT, 0.15f)
+        return p.getFloat(KEY_THUMB_LEGACY, 0.15f)
+    }
+
+    fun setThumbRight(context: Context, v: Float) {
+        prefs(context).edit { putFloat(KEY_THUMB_RIGHT, v) }
+    }
+
+    /** 左侧挖孔：高度 0=不挖孔；位置=孔上边缘距屏幕顶部百分比 */
+    fun getLeftHoleHeight(context: Context): Float =
+        prefs(context).getFloat(KEY_LEFT_HOLE_HEIGHT, 0f)
+
+    fun setLeftHoleHeight(context: Context, v: Float) {
+        prefs(context).edit { putFloat(KEY_LEFT_HOLE_HEIGHT, v) }
+    }
+
+    fun getLeftHolePos(context: Context): Float =
+        prefs(context).getFloat(KEY_LEFT_HOLE_POS, 0.5f)
+
+    fun setLeftHolePos(context: Context, v: Float) {
+        prefs(context).edit { putFloat(KEY_LEFT_HOLE_POS, v) }
+    }
+
+    fun getRightHoleHeight(context: Context): Float =
+        prefs(context).getFloat(KEY_RIGHT_HOLE_HEIGHT, 0f)
+
+    fun setRightHoleHeight(context: Context, v: Float) {
+        prefs(context).edit { putFloat(KEY_RIGHT_HOLE_HEIGHT, v) }
+    }
+
+    fun getRightHolePos(context: Context): Float =
+        prefs(context).getFloat(KEY_RIGHT_HOLE_POS, 0.5f)
+
+    fun setRightHolePos(context: Context, v: Float) {
+        prefs(context).edit { putFloat(KEY_RIGHT_HOLE_POS, v) }
     }
 
     fun isEnabled(context: Context): Boolean =

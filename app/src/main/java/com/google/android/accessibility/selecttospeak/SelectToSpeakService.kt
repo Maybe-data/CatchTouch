@@ -372,12 +372,14 @@ class SelectToSpeakService : AccessibilityService() {
                 MaskMode.MODE_ONE -> addRectMasks(wm, sw, sh,
                     SettingsManager.getTop(this), SettingsManager.getBottom(this),
                     SettingsManager.getLeft(this), SettingsManager.getRight(this))
-                MaskMode.MODE_TWO -> addFanMasks(wm, sw, sh, SettingsManager.getThumb(this))
+                MaskMode.MODE_TWO -> addFanMasks(wm, sw, sh,
+                    SettingsManager.getThumbLeft(this), SettingsManager.getThumbRight(this))
                 MaskMode.MIXED -> {
                     addRectMasks(wm, sw, sh,
                         SettingsManager.getTop(this), SettingsManager.getBottom(this),
                         SettingsManager.getLeft(this), SettingsManager.getRight(this))
-                    addFanMasks(wm, sw, sh, SettingsManager.getThumb(this))
+                    addFanMasks(wm, sw, sh,
+                        SettingsManager.getThumbLeft(this), SettingsManager.getThumbRight(this))
                 }
             }
         } catch (_: Exception) {}
@@ -390,39 +392,79 @@ class SelectToSpeakService : AccessibilityService() {
     ) {
         val topH = (sh * topP).toInt()
         val bottomH = (sh * bottomP).toInt()
-        val leftW = (sw * leftP).toInt()
-        val rightW = (sw * rightP).toInt()
         if (topP > 0f) addBlockView(wm, sw, topH, Gravity.TOP or Gravity.START, 0)
         if (bottomP > 0f) addBlockView(wm, sw, bottomH, Gravity.BOTTOM or Gravity.START, 0)
-        if (leftP > 0f) addBlockView(wm, leftW, sh - topH - bottomH, Gravity.TOP or Gravity.START, topH)
-        if (rightP > 0f) addBlockView(wm, rightW, sh - topH - bottomH, Gravity.TOP or Gravity.END, topH)
+        addSideMaskWithHole(wm, sw, sh, topH, bottomH, leftP, true)
+        addSideMaskWithHole(wm, sw, sh, topH, bottomH, rightP, false)
     }
 
-    private fun addFanMasks(wm: WindowManager, sw: Int, sh: Int, thumbP: Float) {
-        if (thumbP <= 0f) return
-        val radius = (Math.max(sw, sh) * thumbP).toInt()
-        val leftView = FanMaskView(this).apply { isLeftFan = true; fanRadius = radius }
-        wm.addView(leftView, WindowManager.LayoutParams(
-            radius, radius,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.BOTTOM or Gravity.START
-            allowCutout()
-        })
-        maskViews.add(leftView)
-        val rightView = FanMaskView(this).apply { isLeftFan = false; fanRadius = radius }
-        wm.addView(rightView, WindowManager.LayoutParams(
-            radius, radius,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.BOTTOM or Gravity.END
-            allowCutout()
-        })
-        maskViews.add(rightView)
+    /**
+     * 单侧竖条遮罩：无挖孔时整条一块；有挖孔时拆为上下两段，
+     * 孔处不放置视图（触摸自然穿透）。孔自动夹紧在竖条范围内。
+     */
+    private fun addSideMaskWithHole(
+        wm: WindowManager, sw: Int, sh: Int,
+        topH: Int, bottomH: Int, sideP: Float, isLeft: Boolean
+    ) {
+        if (sideP <= 0f) return
+        val sideW = (sw * sideP).toInt()
+        val stripTop = topH
+        val stripBottom = sh - bottomH
+        val gravity = if (isLeft) Gravity.TOP or Gravity.START else Gravity.TOP or Gravity.END
+
+        fun block(top: Int, bottom: Int) {
+            if (bottom - top > 0) addBlockView(wm, sideW, bottom - top, gravity, top)
+        }
+
+        val holeHPct = if (isLeft) SettingsManager.getLeftHoleHeight(this) else SettingsManager.getRightHoleHeight(this)
+        if (holeHPct <= 0f || stripBottom <= stripTop) {
+            block(stripTop, stripBottom)
+            return
+        }
+
+        val posPct = if (isLeft) SettingsManager.getLeftHolePos(this) else SettingsManager.getRightHolePos(this)
+        val holeH = (sh * holeHPct).toInt()
+        var holeBottom = sh - (sh * posPct).toInt() // 位置从底部向上计
+        var holeTop = holeBottom - holeH
+        if (holeBottom - holeTop >= stripBottom - stripTop) return // 孔覆盖整条：该侧完全放行
+        if (holeBottom > stripBottom) { holeTop -= holeBottom - stripBottom; holeBottom = stripBottom }
+        if (holeTop < stripTop) { holeBottom += stripTop - holeTop; holeTop = stripTop }
+
+        block(stripTop, holeTop)
+        block(holeBottom, stripBottom)
+    }
+
+    private fun addFanMasks(wm: WindowManager, sw: Int, sh: Int, leftP: Float, rightP: Float) {
+        if (leftP <= 0f && rightP <= 0f) return
+        val base = Math.max(sw, sh)
+        if (leftP > 0f) {
+            val radiusL = (base * leftP).toInt()
+            val leftView = FanMaskView(this).apply { isLeftFan = true; fanRadius = radiusL }
+            wm.addView(leftView, WindowManager.LayoutParams(
+                radiusL, radiusL,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.BOTTOM or Gravity.START
+                allowCutout()
+            })
+            maskViews.add(leftView)
+        }
+        if (rightP > 0f) {
+            val radiusR = (base * rightP).toInt()
+            val rightView = FanMaskView(this).apply { isLeftFan = false; fanRadius = radiusR }
+            wm.addView(rightView, WindowManager.LayoutParams(
+                radiusR, radiusR,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.BOTTOM or Gravity.END
+                allowCutout()
+            })
+            maskViews.add(rightView)
+        }
     }
 
     private fun addBlockView(wm: WindowManager, width: Int, height: Int, gravity: Int, y: Int) {
