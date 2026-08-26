@@ -2,6 +2,7 @@ package com.catchtouch.app
 
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import com.google.android.accessibility.selecttospeak.SelectToSpeakService
 
 class AntiTouchTileService : TileService() {
 
@@ -22,7 +23,7 @@ class AntiTouchTileService : TileService() {
 
     override fun onClick() {
         super.onClick()
-        val service = AntiTouchService.instance
+        val service = SelectToSpeakService.instance
         if (service == null) {
             updateTileInactive()
             return

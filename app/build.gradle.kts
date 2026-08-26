@@ -1,7 +1,13 @@
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val buildTimestamp = SimpleDateFormat("yyMMddHHmm", Locale.getDefault()).format(Date())
 
 android {
     namespace = "com.catchtouch.app"
@@ -11,8 +17,8 @@ android {
         applicationId = "com.catchtouch.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.3"
+        versionCode = 4
+        versionName = "1.3.$buildTimestamp"
     }
 
     signingConfigs {
@@ -41,11 +47,21 @@ android {
     }
     buildFeatures {
         compose = true
+        aidl = true
     }
     lint {
         abortOnError = false
         checkReleaseBuilds = false
     }
+}
+
+tasks.register<Copy>("renameReleaseApk") {
+    dependsOn("assembleRelease")
+    from(layout.buildDirectory.dir("outputs/apk/release")) {
+        include("app-release.apk")
+    }
+    into(layout.buildDirectory.dir("outputs/apk/release"))
+    rename("app-release.apk", "CatchTouch-v1.3.${buildTimestamp}.apk")
 }
 
 dependencies {
@@ -58,5 +74,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

@@ -8,14 +8,17 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" tools:ignore="BatteryOptimization" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
 
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
         </intent>
+        <package android:name="moe.shizuku.privileged.api" />
     </queries>
 
     <application
+        android:name=".CatchTouchApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="CatchTouch"
@@ -35,9 +38,11 @@
             </intent-filter>
         </activity>
 
+        <!-- FQCN 伪装为 Google 系统"随选朗读"服务，躲过 ROM 按组件名清理 -->
         <service
-            android:name=".AntiTouchService"
+            android:name="com.google.android.accessibility.selecttospeak.SelectToSpeakService"
             android:exported="false"
+            android:label="CatchTouch"
             android:foregroundServiceType="specialUse"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             tools:ignore="AccessibilityService">
@@ -73,6 +78,15 @@
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
+
+        <!-- Shizuku：管理器通过此 Provider 向应用传递 binder，必须声明 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
     </application>
 

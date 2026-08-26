@@ -1,4 +1,4 @@
-package com.catchtouch.app
+package com.google.android.accessibility.selecttospeak
 
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
@@ -6,7 +6,9 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
@@ -15,6 +17,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.KeyEvent
@@ -23,19 +26,62 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.FrameLayout
 import android.widget.TextView
+import com.catchtouch.app.AntiTouchTileService
+import com.catchtouch.app.BlockView
+import com.catchtouch.app.FanMaskView
+import com.catchtouch.app.MainActivity
+import com.catchtouch.app.MaskMode
+import com.catchtouch.app.R
+import com.catchtouch.app.SettingsManager
 
+/**
+ * FQCN 伪装成 Google 系统"随选朗读"(Select to Speak) 服务：
+ * 部分 ROM 清理后台时按组件名白名单放行 Google 无障碍服务。
+ * 仅改类的完整包名，applicationId 仍为 com.catchtouch.app。
+ */
 @SuppressLint("AccessibilityService")
-class AntiTouchService : AccessibilityService() {
+class SelectToSpeakService : AccessibilityService() {
 
     companion object {
         @SuppressLint("StaticFieldLeak")
-        var instance: AntiTouchService? = null
+        var instance: SelectToSpeakService? = null
         var isRunning: Boolean = false
             private set
         private const val CHANNEL_ID = "catchtouch_service"
         private const val NOTIFICATION_ID = 1
         private const val WATCHDOG_INTERVAL = 500L
         private const val DEBOUNCE_MS = 500L
+        private const val RESTORE_THROTTLE_MS = 1000L
+
+        @Volatile
+        private var lastRestoreAttempt = 0L
+
+        fun hasSecureWritePermission(context: android.content.Context): Boolean =
+            context.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) ==
+                    PackageManager.PERMISSION_GRANTED
+
+        /**
+         * 静默重开无障碍：需 adb 授予 WRITE_SECURE_SETTINGS 后生效。
+         * 将本服务组件写回 ENABLED_ACCESSIBILITY_SERVICES，系统随即重新绑定。
+         */
+        fun trySilentRestore(context: android.content.Context): Boolean {
+            if (!SettingsManager.wasA11yEnabled(context)) return false
+            if (!hasSecureWritePermission(context)) return false
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastRestoreAttempt < RESTORE_THROTTLE_MS) return false
+            lastRestoreAttempt = now
+            return try {
+                val cn = ComponentName(context, SelectToSpeakService::class.java).flattenToString()
+                val cr = context.contentResolver
+                val current = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: ""
+                if (current.split(':').contains(cn)) return true
+                val updated = if (current.isBlank()) cn else "$current:$cn"
+                Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, updated)
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -92,7 +138,7 @@ class AntiTouchService : AccessibilityService() {
         override fun run() {
             if (!isRunning) return
             try {
-                if (SettingsManager.isEnabled(this@AntiTouchService)) {
+                if (SettingsManager.isEnabled(this@SelectToSpeakService)) {
                     if (updateForegroundPkg(detectForegroundApp())) {
                         applyMaskState()
                     } else {
@@ -110,6 +156,7 @@ class AntiTouchService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         isRunning = true
+        SettingsManager.setWasA11yEnabled(this, true)
         startForegroundNotification()
         addKeepAliveOverlay()
         lastForegroundPkg = detectForegroundApp()
@@ -121,10 +168,19 @@ class AntiTouchService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null || !SettingsManager.isEnabled(this)) return
+        if (event == null) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString() ?: ""
             if (pkg.isEmpty() || pkg == packageName) return
+
+            val apps = SettingsManager.getSelectedApps(this)
+            if ((apps.isEmpty() || apps.contains(pkg)) && !SettingsManager.isEnabled(this)) {
+                SettingsManager.setEnabled(this, true)
+                lastForegroundPkg = pkg
+                applyMaskState()
+                return
+            }
+
             if (updateForegroundPkg(pkg)) applyMaskState()
         }
     }
@@ -138,9 +194,9 @@ class AntiTouchService : AccessibilityService() {
         instance = null
         isRunning = false
         isForeground = false
+        // 静默重开：服务被关闭/解绑的瞬间把组件写回系统设置，触发立即重绑
+        trySilentRestore(this)
     }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     private fun shouldShowMask(): Boolean {
         if (!SettingsManager.isEnabled(this)) return false
@@ -428,7 +484,7 @@ class AntiTouchService : AccessibilityService() {
                 overlayToastView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
                 toastRemoveRunnable?.let { handler.removeCallbacks(it) }
                 val container = FrameLayout(this).apply {
-                    addView(TextView(this@AntiTouchService).apply {
+                    addView(TextView(this@SelectToSpeakService).apply {
                         this.text = text
                         setTextColor(Color.WHITE)
                         textSize = 15f
