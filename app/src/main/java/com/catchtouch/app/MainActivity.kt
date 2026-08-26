@@ -11,6 +11,7 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -25,11 +26,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -59,10 +62,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -203,32 +208,30 @@ fun MainScreen() {
                     AppSelector()
 
                     if (maskMode == MaskMode.MODE_ONE || maskMode == MaskMode.MIXED) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SliderItem("顶部", topPercent, 0.15f, Modifier.weight(1f)) { v -> topPercent = v; SettingsManager.setTop(context, v) }
-                            SliderItem("底部", bottomPercent, 0.15f, Modifier.weight(1f)) { v -> bottomPercent = v; SettingsManager.setBottom(context, v) }
+                        CollapsibleSection(title = "边框遮罩") {
+                            SliderItem("顶部", topPercent, 0.15f) { v -> topPercent = v; SettingsManager.setTop(context, v) }
+                            SliderItem("底部", bottomPercent, 0.15f) { v -> bottomPercent = v; SettingsManager.setBottom(context, v) }
+                            SliderItem("左侧", leftPercent, 0.15f) { v -> leftPercent = v; SettingsManager.setLeft(context, v) }
+                            SliderItem("右侧", rightPercent, 0.15f) { v -> rightPercent = v; SettingsManager.setRight(context, v) }
                         }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SliderItem("左侧", leftPercent, 0.15f, Modifier.weight(1f)) { v -> leftPercent = v; SettingsManager.setLeft(context, v) }
-                            SliderItem("右侧", rightPercent, 0.15f, Modifier.weight(1f)) { v -> rightPercent = v; SettingsManager.setRight(context, v) }
-                        }
-                        if (leftPercent > 0f) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                SliderItem("左挖孔高", leftHoleHeight, 0.30f, Modifier.weight(1f)) { v -> leftHoleHeight = v; SettingsManager.setLeftHoleHeight(context, v) }
-                                SliderItem("左挖孔位", leftHolePos, 1f, Modifier.weight(1f)) { v -> leftHolePos = v; SettingsManager.setLeftHolePos(context, v) }
-                            }
-                        }
-                        if (rightPercent > 0f) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                SliderItem("右挖孔高", rightHoleHeight, 0.30f, Modifier.weight(1f)) { v -> rightHoleHeight = v; SettingsManager.setRightHoleHeight(context, v) }
-                                SliderItem("右挖孔位", rightHolePos, 1f, Modifier.weight(1f)) { v -> rightHolePos = v; SettingsManager.setRightHolePos(context, v) }
+                        if (leftPercent > 0f || rightPercent > 0f) {
+                            CollapsibleSection(title = "挖孔") {
+                                if (leftPercent > 0f) {
+                                    SliderItem("左挖孔高", leftHoleHeight, 0.30f) { v -> leftHoleHeight = v; SettingsManager.setLeftHoleHeight(context, v) }
+                                    SliderItem("左挖孔位", leftHolePos, 1f) { v -> leftHolePos = v; SettingsManager.setLeftHolePos(context, v) }
+                                }
+                                if (rightPercent > 0f) {
+                                    SliderItem("右挖孔高", rightHoleHeight, 0.30f) { v -> rightHoleHeight = v; SettingsManager.setRightHoleHeight(context, v) }
+                                    SliderItem("右挖孔位", rightHolePos, 1f) { v -> rightHolePos = v; SettingsManager.setRightHolePos(context, v) }
+                                }
                             }
                         }
                     }
 
                     if (maskMode == MaskMode.MODE_TWO || maskMode == MaskMode.MIXED) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SliderItem("左拇指", thumbLeft, 0.30f, Modifier.weight(1f)) { v -> thumbLeft = v; SettingsManager.setThumbLeft(context, v) }
-                            SliderItem("右拇指", thumbRight, 0.30f, Modifier.weight(1f)) { v -> thumbRight = v; SettingsManager.setThumbRight(context, v) }
+                        CollapsibleSection(title = "拇指扇形") {
+                            SliderItem("左拇指", thumbLeft, 0.30f) { v -> thumbLeft = v; SettingsManager.setThumbLeft(context, v) }
+                            SliderItem("右拇指", thumbRight, 0.30f) { v -> thumbRight = v; SettingsManager.setThumbRight(context, v) }
                         }
                     }
 
@@ -521,16 +524,47 @@ fun ModeDropdown(selected: MaskMode, onSelect: (MaskMode) -> Unit) {
 }
 
 @Composable
-fun SliderItem(label: String, value: Float, maxValue: Float, modifier: Modifier = Modifier, onValueChange: (Float) -> Unit) {
-    Column(modifier = modifier) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(label, color = Purple300, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-            Text("${(value * 100).toInt()}%", color = Purple300, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+fun CollapsibleSection(title: String, content: @Composable () -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val arrowRotation by animateFloatAsState(if (expanded) 0f else 90f, label = "arrow")
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(title, color = Purple300, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription = null,
+                tint = Purple300,
+                modifier = Modifier.size(20.dp).rotate(arrowRotation)
+            )
         }
+        AnimatedVisibility(visible = expanded) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.padding(top = 6.dp)
+            ) { content() }
+        }
+    }
+}
+
+@Composable
+fun SliderItem(label: String, value: Float, maxValue: Float, modifier: Modifier = Modifier, onValueChange: (Float) -> Unit) {
+    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Purple300, fontSize = 12.sp, modifier = Modifier.width(64.dp))
         Slider(
             value = value, onValueChange = onValueChange, valueRange = 0f..maxValue,
             colors = SliderDefaults.colors(thumbColor = Purple200, activeTrackColor = Purple100, inactiveTrackColor = Purple50),
-            modifier = Modifier.fillMaxWidth().height(24.dp)
+            modifier = Modifier.weight(1f).height(24.dp)
+        )
+        Text(
+            "${(value * 100).toInt()}%",
+            color = Purple300, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.End, modifier = Modifier.width(38.dp)
         )
     }
 }

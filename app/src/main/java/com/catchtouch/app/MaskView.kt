@@ -57,8 +57,6 @@ class MaskView @JvmOverloads constructor(
     private fun drawRectPreview(canvas: Canvas, w: Float, h: Float) {
         val topH = h * topPercent
         val bottomH = h * bottomPercent
-        val leftW = w * leftPercent
-        val rightW = w * rightPercent
         if (topPercent > 0f) {
             canvas.drawRect(0f, 0f, w, topH, maskPaint)
             canvas.drawLine(0f, topH, w, topH, borderPaint)

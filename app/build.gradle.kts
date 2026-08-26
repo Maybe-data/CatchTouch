@@ -17,8 +17,8 @@ android {
         applicationId = "com.catchtouch.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.3.$buildTimestamp"
+        versionCode = 5
+        versionName = "1.4.$buildTimestamp"
     }
 
     signingConfigs {
@@ -61,7 +61,7 @@ tasks.register<Copy>("renameReleaseApk") {
         include("app-release.apk")
     }
     into(layout.buildDirectory.dir("outputs/apk/release"))
-    rename("app-release.apk", "CatchTouch-v1.3.${buildTimestamp}.apk")
+    rename("app-release.apk", "CatchTouch-v1.4.${buildTimestamp}.apk")
 }
 
 dependencies {
